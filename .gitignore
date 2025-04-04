@@ -1,1 +1,5 @@
 venv/
+json.json
+__pycache__/
+config.py
+data_fetchers/__pycache__
