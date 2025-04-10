@@ -71,7 +71,7 @@ RESOURCES = {
         "keys": ["groupId", "name"]
     },
     # "Users": {
-    #     "fetch_function": JiraFetcher.get_users,
+        # "fetch_function": JiraFetcher.get_users,
     #     "keys": ["accountId", "displayName", "accountType", "active"]
     # },
     "Screens": {

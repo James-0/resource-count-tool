@@ -9,8 +9,7 @@ async def main():
     counts_list = []
     pending_dependencies = {}
     completed_resources = set()
-    dependency_data = {}  
-
+    dependency_data = {}
 
     for resource_name, details in RESOURCES.items():
         if "dependencies" in details:
@@ -25,17 +24,30 @@ async def main():
             values = details.get("values", "values")
             await queue.put((resource_name, fetch_function, keys, values))
 
-    worker_tasks = []
-    for _ in range(3):
-        worker_task = asyncio.create_task(worker(queue, results, counts_list, pending_dependencies, 
-                                                 completed_resources, RESOURCES, dependency_data))
-        worker_tasks.append(worker_task)
+    num_workers = 3
 
+    # Spawn worker tasks
+    worker_tasks = [
+        asyncio.create_task(worker(
+            queue,
+            results,
+            counts_list,
+            pending_dependencies,
+            completed_resources,
+            RESOURCES,
+            dependency_data
+        ))
+        for _ in range(num_workers)
+    ]
+
+    # Wait for the queue to be fully processed
     await queue.join()
 
-    for _ in range(3):
+    # Signal workers to shut down
+    for _ in range(num_workers):
         await queue.put(None)
 
+    # Wait for all worker tasks to complete
     await asyncio.gather(*worker_tasks)
 
     # Process results
@@ -47,16 +59,13 @@ async def main():
         "Resource Counts": [
             {
                 "Resource": k,
-                "Count": v[0] if isinstance(v, list) else v,  # Use v[0] if list, else v directly
+                "Count": v[0] if isinstance(v, list) else v,
                 "Active": v[1] if isinstance(v, list) and len(v) > 1 else None,
                 "Inactive": v[2] if isinstance(v, list) and len(v) > 2 else None,
             }
             for k, v in resource_counts.items()
         ]
     }
-    # resource_name_to_remove = "Projects Issue Security Scheme"
-    # results = [(name, res) for name, res in results if name != resource_name_to_remove]
-
 
     final_data.update(dict(results))
 
@@ -67,7 +76,5 @@ async def main():
     if JiraFetcher._session:
         await JiraFetcher._session.close()
 
-
 if __name__ == "__main__":
     asyncio.run(main())
-
