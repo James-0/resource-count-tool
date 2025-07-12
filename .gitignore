@@ -4,3 +4,5 @@ json.json
 __pycache__/
 data_fetchers/__pycache__
 servicee.py
+reports/
+temp/

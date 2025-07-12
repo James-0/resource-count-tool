@@ -10,6 +10,11 @@ class JiraFetcher:
     SEMAPHORE = asyncio.Semaphore(5)
 
     @classmethod
+    async def close_session(cls):
+        if cls._session and not cls._session.closed:
+            await cls._session.close()
+
+    @classmethod
     async def get_session(cls):
         if cls._session is None:
             cls._session = aiohttp.ClientSession(headers=HEADERS)
@@ -30,7 +35,14 @@ class JiraFetcher:
                         print(f"Rate limited. Retrying in {retry_after} seconds...")
                         await asyncio.sleep(retry_after)
                     else:
-                        response.raise_for_status()
+                        text = await response.text()
+                        raise aiohttp.ClientResponseError(
+                            request_info=response.request_info,
+                            history=response.history,
+                            status=response.status,
+                            message=text,
+                            headers=response.headers
+                        )
         return {}
 
 
@@ -53,16 +65,21 @@ class JiraFetcher:
         params = {
                 "startAt": next,
                 "maxResults": max_results,
-                "expand": "insight",
+                "status": "live, archived",
+                "expand": "issueTypes",
             }
         extract = {'values': 'values'}
         return await JiraFetcher.fetch_data(url, params)
     
     @staticmethod
     async def get_workflows(next):
-        url = f"/rest/api/3/workflow/search"
-        params = {"maxResults": 50, "startAt" : next}
-        extract = {'values': 'values'}
+        url = f"/rest/api/3/workflows/search"
+        params = {
+                "expand": "values.transitions",
+                "startAt" : next,
+                "maxResults": 50
+            }
+        # extract = {'values': 'values'}
         return await JiraFetcher.fetch_data(url, params=params)
 
     @staticmethod
@@ -72,8 +89,8 @@ class JiraFetcher:
         extract = {'values': 'values'}
         # print("this workflow schems are called")
         workflow_schemes=  await JiraFetcher.fetch_data(url, params)
-
         return workflow_schemes
+    
     @staticmethod
     async def get_custom_fields(start_at = None):
         url = f"/rest/api/3/field"
@@ -104,6 +121,13 @@ class JiraFetcher:
         url = f"/rest/api/3/dashboard"
         params = {"values": "dashboards"}
         return await JiraFetcher.get_dict(url)
+
+    @staticmethod
+    async def get_field_configurations(next):
+        url = f"/rest/api/3/fieldconfiguration"
+        params = {"maxResults": 50, "startAt": next}
+        extract = {'values': 'values'}
+        return await JiraFetcher.fetch_data(url, params=params)
     
     @staticmethod
     async def get_field_configuration_schemes(next):
@@ -147,6 +171,19 @@ class JiraFetcher:
     async def get_issue_types(params=None):
         url = f"/rest/api/3/issuetype"
         return await JiraFetcher.get_list(url)
+    
+    # @staticmethod
+    # async def get_issue_types(params=None):
+    #     url = f"/rest/api/3/project/search"
+    #     # start_at = 0
+    #     max_results = 50
+    #     params = {
+    #             "startAt": next,
+    #             "maxResults": max_results,
+    #             "expand": "issueTypes",
+    #         }
+    #     extract = {'values': 'values'}
+    #     return await JiraFetcher.fetch_data(url, params)
     
     @staticmethod
     async def get_project_issue_types(projectId):
@@ -217,6 +254,12 @@ class JiraFetcher:
         return await JiraFetcher.fetch_data(url, params=params)
     
     @staticmethod
+    async def get_active_screens(screen_scheme_id):
+        url = f"/rest/api/3/screenscheme?id={screen_scheme_id}"
+        result = await JiraFetcher.get_dict(url)
+        return result.get("values", [])
+    
+    @staticmethod
     async def get_screen_schemes(next):
         url = f"/rest/api/3/screenscheme"
         params = {"maxResults": 50, "startAt": next}
@@ -241,8 +284,15 @@ class JiraFetcher:
     @staticmethod
     async def get_assigned_permission_scheme(projectKeyOrId):
         url = f"/rest/api/3/project/{projectKeyOrId}/permissionscheme"
-        result = await JiraFetcher.get_dict(url)
-        return result.get("permissionScheme")
+        try:
+            result = await JiraFetcher.get_dict(url)
+            return result.get("permissionScheme")
+        except aiohttp.client_exceptions.ClientResponseError as e:
+            if e.code == 404 or e.code == 403:
+                print(f"Permission scheme for project '{projectKeyOrId}' not found. Skipping...")
+                return None
+            else:
+                raise e
     
     @staticmethod
     async def process_active_inactive_workflow_scheme(id):
@@ -265,8 +315,16 @@ class JiraFetcher:
     
     @staticmethod
     async def get_permission_schemes_by_project(projectKeyOrId):
-        url = f"/rest/api/3/project/{projectKeyOrId}/permissionscheme"
-        return await JiraFetcher.get_dict(url)
+        try:
+            url = f"/rest/api/3/project/{projectKeyOrId}/permissionscheme"
+            return await JiraFetcher.get_dict(url)
+        except aiohttp.client_exceptions.ClientResponseError as e:
+            if e.code == 404 or e.code == 403:
+                print(f"Permission scheme for project '{projectKeyOrId}' not found. Skipping...")
+                return None
+            else:
+                raise e        
+    
 
     @staticmethod
     async def get_notification_schemes(next=None):
@@ -281,7 +339,7 @@ class JiraFetcher:
             result = await JiraFetcher.fetch_data(url)
             return result
         except aiohttp.client_exceptions.ClientResponseError as e:
-            if e.code == 404:
+            if e.code == 404 or e.code == 403:
                 print(f"Notification scheme for project '{projectKeyOrId}' not found. Skipping...")
                 return None
             else:
@@ -311,6 +369,13 @@ class JiraFetcher:
     @staticmethod
     async def get_issue_type_screen_scheme(next):
         url = f"/rest/api/3/issuetypescreenscheme/mapping"
+        params = {"maxResults": 50, "startAt": next}
+        result = await JiraFetcher.fetch_data(url, params)
+        return result
+    
+    @staticmethod
+    async def get_issue_statuses(next):
+        url = f"/rest/api/3/statuses/search?expand=workflowUsages"
         params = {"maxResults": 50, "startAt": next}
         result = await JiraFetcher.fetch_data(url, params)
         return result

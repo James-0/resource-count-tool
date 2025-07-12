@@ -19,8 +19,10 @@ async def fetch_and_process_resource(name, fetch_fn, RESOURCES, keys, values, de
     if name == "Issue Security Schemes":
         result = await process_data.streamline_data(result)
 
+
     if not RESOURCES[name].get("unique", False):
         result = await process_data.extract_values(result, keys)
+
 
     if RESOURCES[name].get("should_additional_processes") or dep_data:
         should_temp = RESOURCES[name].get("should_temp", False)
@@ -35,11 +37,16 @@ async def fetch_and_process_resource(name, fetch_fn, RESOURCES, keys, values, de
 
     return result, count
 
-def store_dependencies(resource_name, result, keys, RESOURCES, dependency_data):
-    if any(resource_name in val for val in RESOURCES.values()):
+def store_dependencies(resource_name, result, keys, RESOURCES, dependency_data, freed_resources):
+    # Check if current resource is a dependency in any of the freed_resources values
+    is_dependency = any(resource_name in deps for deps in freed_resources.values())
+    
+    if is_dependency:
+        print(f"Storing {resource_name} as dependency data")
         store_key = RESOURCES.get(resource_name, {}).get("store_key")
         store_value = result.get(store_key) if store_key else result.get(keys[0], [])
         dependency_data[resource_name] = store_value
+        print(f"Stored {resource_name} as dependency data for: {dependency_data[resource_name][:3]}")
 
 async def schedule_dependents(queue, current_resource, pending_dependencies, completed_resources, RESOURCES):
     to_remove = []
@@ -56,7 +63,6 @@ async def schedule_dependents(queue, current_resource, pending_dependencies, com
         keys = RESOURCES[res].get("keys", [])
         values = RESOURCES[res].get("values", "values")
         await queue.put((res, fetch_function, keys, values))
-
 
 async def additional_process(resource_name, data, count, dep_data, should_temp, keys):
     print(f"Further Processing: {resource_name}")
@@ -95,7 +101,7 @@ async def additional_process(resource_name, data, count, dep_data, should_temp, 
             updated_data, updated_count = await process_notification_schemes(JiraFetcher.get_active_issue_type_screen_scheme, resource_name, data, count, dep_data, should_temp)
             return updated_data, updated_count
         case "Screens":
-            updated_data, updated_count = await process_screens(resource_name, data, count, dep_data)
+            updated_data, updated_count = await process_screens(JiraFetcher.get_active_screens, resource_name, data, count, dep_data)
             return updated_data, updated_count
         case "Priority Schemes":
             updated_data, updated_count = await process_priority_schemes(JiraFetcher.get_projects_by_priority_scheme, resource_name, data, count)
@@ -161,6 +167,7 @@ async def worker(queue, results, counts_list, pending_dependencies, completed_re
         if resource_name in pending_dependencies:
             await wait_for_dependencies(resource_name, pending_dependencies, completed_resources)
 
+        print(f"Pending Dependencies: {pending_dependencies}")
         print(f"\n🚀 Processing: {resource_name}")
 
         # 🔗 Check if it depends on another resource
@@ -174,15 +181,18 @@ async def worker(queue, results, counts_list, pending_dependencies, completed_re
             )
 
             # 📦 Store dependency data if needed
-            store_dependencies(resource_name, result, keys, RESOURCES, dependency_data)
+            store_dependencies(resource_name, result, keys, RESOURCES, dependency_data, freed_resources)
 
             if is_calling_dependent:
+                print(f"Dependency String: {dep_string}")
+                print(f"Popping {resource_name} from {freed_resources.keys()}")
                 freed_resources.pop(resource_name)
 
             # 📊 Save final results
             if not RESOURCES[resource_name].get("skip_append_flag", False):
                 counts_list.append(count)
                 results.append((resource_name, result))
+                print(f"Stored {resource_name} data")
 
             completed_resources.add(resource_name)
 

@@ -73,8 +73,8 @@ async def main():
 
     export_to_xlsx(final_data)
 
-    if JiraFetcher._session:
-        await JiraFetcher._session.close()
+    await JiraFetcher.close_session()
+    await asyncio.sleep(0.1)
 
 if __name__ == "__main__":
     asyncio.run(main())

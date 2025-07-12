@@ -21,31 +21,23 @@ async def get_value(data, key_path):
         value = item
         if isinstance(key_path, list):
             for key in key_path:
-                if isinstance(value, dict) and key in value:
-                    value = value[key]
+                if isinstance(value, dict):
+                    value = value.get(key, " ")  # Return " " if key not found or empty
                 else:
-                    value = None
+                    value = " "  # Return " " if value is not a dictionary
                     break
-        # elif is_timestamp(data):
-        #     if is_timestamp(data):
-        #         print(is_timestamp(data))
-        #         extract_date(data)
-        #     try:
-        #         datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%f%z") #2024-03-16T16:24:57.178+0000
-        #         value = extract_date(value)
-        #     except ValueError:
-        #         pass 
         else:
             if '.' in key_path:
                 keys = key_path.split(".")
                 for key in keys:
-                    if isinstance(value, dict) and key in value:
-                        value = value[key]
+                    if isinstance(value, dict):
+                        value = value.get(key, " ")  # Return " " if key not found or empty
                     else:
-                        value = None
+                        value = " "  # Return " " if value is not a dictionary
                         break
             else:
-                value = item.get(key_path) if isinstance(item, dict) else None
+                value = item.get(key_path, " ") if isinstance(item, dict) else " "
+        
         if isinstance(value, str) and is_timestamp(value):
             value = extract_date(value) 
         results.append(value)
@@ -67,4 +59,3 @@ def is_all_none(lst, lst2):
 
 async def streamline_data(resource_list):
     return [obj for obj in resource_list if "issueSecuritySchemeId" in obj]
-     

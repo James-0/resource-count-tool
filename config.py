@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 # JIRA_BASE_URL = "https://alluvium-hq-sandbox-277.atlassian.net"
 JIRA_BASE_URL = "https://alluvium-hq.atlassian.net"
+# JIRA_BASE_URL = "https://goalluvium-sandbox.atlassian.net"
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN")
 if JIRA_API_TOKEN is None:
     raise ValueError("JIRA_API_TOKEN environment variable not set.")

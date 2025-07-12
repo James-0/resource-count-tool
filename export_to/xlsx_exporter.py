@@ -1,10 +1,13 @@
 import pandas as pd
 from datetime import datetime
+import os
+
+os.makedirs("reports", exist_ok=True)
 
 def export_to_xlsx(data):
     # Create a filename using the current date and time
     current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"jira_report_{current_time}.xlsx"
+    filename = f"reports/jira_report_{current_time}.xlsx"
     
     with pd.ExcelWriter(filename) as writer:
         for sheet_name, sheet_data in data.items():
