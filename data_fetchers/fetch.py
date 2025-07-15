@@ -66,7 +66,7 @@ class JiraFetcher:
                 "startAt": next,
                 "maxResults": max_results,
                 "status": "live, archived",
-                "expand": "issueTypes",
+                "expand": "insight",
             }
         extract = {'values': 'values'}
         return await JiraFetcher.fetch_data(url, params)

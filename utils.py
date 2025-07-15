@@ -67,9 +67,6 @@ async def mark_duplicates(resource_name, data_dict, count):
 
     filtered_data["duplicates"] = ["yes" if name in seen else (seen.add(name) or "no") for name in filtered_data["name"]]
 
-    # print(f"Count of Yes in {resource_name} (duplicates): {duplicates.count('yes')}")
-    # print(f"Count of No in {resource_name} (unique): {duplicates.count('no')}")
-
     return filtered_data, count
 
 async def process_notification_schemes(func, resource_name, data, counts, dep_data, should_temp):
@@ -94,9 +91,6 @@ async def process_notification_schemes(func, resource_name, data, counts, dep_da
         data["Active"].count("yes"),
         data["Active"].count("no")
     ]
-    print(f"Updated processed data for: {resource_name}, data keys: {data.keys()}, count: {counts}")
-
-
     return data, counts
 
 async def process_permission_scheme(resource_name, data, counts, dep_data):
@@ -127,11 +121,9 @@ async def process_permission_scheme(resource_name, data, counts, dep_data):
 
         counts[resource_name] = [counts[resource_name]] + [yes_count, no_count]
 
-        # print(f"Updated processed data for: {resource_name}, data keys: {data.keys()}, count: {counts}")
-
         return data, counts
     else:
-        print(f"Projects resource not found. Skipping processing for {resource_name}")
+        # print(f"Projects resource not found. Skipping processing for {resource_name}")
         return data, counts
 
 async def process_issue_types(resource_name, data, counts, dep_data):
@@ -151,7 +143,7 @@ async def process_issue_types(resource_name, data, counts, dep_data):
             data["Active"].count("yes"),
             data["Active"].count("no")
         ]
-        print(f"Updated processed data for: {resource_name}, data keys: {data.keys()}, count: {counts}")
+        # print(f"Updated processed data for: {resource_name}, data keys: {data.keys()}, count: {counts}")
 
     return data, counts
 
@@ -160,7 +152,6 @@ async def process_issue_security_scheme(func, resource_name, data, keys):
     if not data:
         return data, None
     
-    print("Processing issue security scheme")
     dep_data_set = set(map(int, [item["issueSecuritySchemeId"] for item in data if "issueSecuritySchemeId" in item]))
     result, counts = await fetch_resource(resource_name, func, values=None)
     data = await process_data.extract_values(result, keys)
@@ -177,34 +168,43 @@ async def process_workflow(func, resource_name, data, counts, dep_data):
         active_workflow = set()
         active = []
         screen_present = []
+        screen_ids = []
+
         async def process_id(id):
             result = await func(id)
             if result is None:
                 return
-            # Getting
             default_workflow = result.get("defaultWorkflow", '')
             issue_type_mappings = result.get("issueTypeMappings", {})
 
             if default_workflow and default_workflow in workflow_names:
                 active_workflow.add(default_workflow)
             active_workflow.update({value for value in issue_type_mappings.values() if value in workflow_names})
+
         await asyncio.gather(*[process_id(id) for id in dep_data])
+
+        # Flatten transitions once, outside the loop
+        flat_transitions = [t for sublist in workflow_transitions for t in sublist]
+
+        # Collect screen IDs (as integers)
+        screen_ids = [
+            int(t["transitionScreen"]["parameters"]["screenId"])
+            for t in flat_transitions
+            if "transitionScreen" in t and "parameters" in t["transitionScreen"]
+        ]
 
         for name, transitions in zip(workflow_names, workflow_transitions):
             active.append("yes" if name in active_workflow else "no")
-            # [t.get("transitionScreen") for t in transitions]
             screen_present.append("yes" if any(t.get("transitionScreen") for t in transitions) else "no")
 
-            
         yes_count = active.count("yes")
         no_count = active.count("no")
+
         data.pop("transitions", None)
         data["Active?"] = active
         data["Screen Present?"] = screen_present
-
+        data["Screen IDs in workflow"] = screen_ids
         counts[resource_name] = [counts[resource_name]] + [yes_count, no_count]
-
-        # print(f"Updated processed data for: {resource_name}, data keys: {data.keys()}, count: {counts}")
 
         return data, counts
 
@@ -246,11 +246,14 @@ async def process_screen_schemes(func, resource_name, data, counts, dep_data):
     print(f"Updated processed data for: {resource_name}, data keys: {data.keys()}, count: {counts}")
     return data, counts
 
-async def process_screens(func, resource_name, data, counts, dep_data):
-    if dep_data is None:
+async def process_screens(func, resource_name, data, counts, dep_dict):
+    if dep_dict is None:
         return data, counts
         
     active_screen = set()
+    print(f"Processing screens for {resource_name}, dep_dict: {dep_dict.keys()}")
+    dep_data = dep_dict.get("Screen Schemes", [])
+    dep_screen = dep_dict.get("Workflows", [])
 
     async def process_id(id):
         result = await func(id)
@@ -259,6 +262,13 @@ async def process_screens(func, resource_name, data, counts, dep_data):
             active_screen.add(defs)
 
     await asyncio.gather(*[process_id(id) for id in dep_data])
+
+    print(f"active before updating: {len(active_screen)}")
+    print(f"dep_screen: {len(dep_screen)}")
+
+    active_screen.update(int(s) for s in dep_screen)
+
+    print(f"active after updating: {len(active_screen)}")
 
     data["Active"] = ["yes" if id in active_screen else "no" for id in data.get("id", [])]
     counts[resource_name] = [counts[resource_name]] + [
@@ -283,3 +293,27 @@ async def process_priority_schemes(func, resource_name, data, counts):
     ]
     # print(f"Updated processed data for: {resource_name}, data keys: {data.keys()}, count: {counts}")
     return data, counts
+
+async def categorise_projects(name, data, counts):
+    if not data:
+        return data, counts
+    archived = data.get("archived", [])
+    
+    print(f"Processing projects for {name}, archived: {archived[:5]}")
+
+    counts[name] = [counts[name]] + [
+        archived.count(" ") or archived.count(""),
+        archived.count(True),
+    ]
+
+    return data, counts
+
+async def process_issue_statuses(data):
+    if not data:
+        return data
+    
+    workflow_usages = data.get("workflowUsages", [])
+    
+    workflow_counts = [len(group) for group in workflow_usages]
+    data["workflowUsages"] = workflow_counts
+    return data

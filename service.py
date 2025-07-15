@@ -4,14 +4,22 @@ from data_fetchers.fetch import JiraFetcher
 import process_data
 
 
-from utils import categorize_workflow_scheme, mark_duplicates, process_issue_security_scheme, process_issue_types, process_notification_schemes, process_permission_scheme, process_priority_schemes, process_screen_schemes, process_screens, process_workflow 
+from utils import categorize_workflow_scheme, mark_duplicates, process_issue_security_scheme, process_issue_types, process_notification_schemes, process_permission_scheme, process_priority_schemes, process_screen_schemes, process_screens, process_workflow, categorise_projects, process_issue_statuses
 async def wait_for_dependencies(resource_name, pending, completed):
     while not pending[resource_name].issubset(completed):
         print(f"⏳ Waiting for dependencies of {resource_name}")
         await asyncio.sleep(0.1)
 
 def get_dependency_name(resources, name):
-    return next(iter(resources[name].get("dependencies", [])), None)
+    return resources[name].get("dependencies", [])
+
+def get_dependency_data(resources, name, dependency_data):
+    keys = get_dependency_name(resources, name)
+    if len(keys) == 1:
+        return dependency_data.get(keys[0], [])
+    elif len(keys) > 1:
+        return {key: dependency_data[key] for key in keys if key in dependency_data}
+
 
 async def fetch_and_process_resource(name, fetch_fn, RESOURCES, keys, values, dep_data):
     result, count = await fetch_resource(name, fetch_fn, values)
@@ -23,6 +31,11 @@ async def fetch_and_process_resource(name, fetch_fn, RESOURCES, keys, values, de
     if not RESOURCES[name].get("unique", False):
         result = await process_data.extract_values(result, keys)
 
+    if name == "Projects":
+        result, count = await categorise_projects(name, result, count)
+
+    if name == "Issue Statuses":
+        result = await process_issue_statuses(result)
 
     if RESOURCES[name].get("should_additional_processes") or dep_data:
         should_temp = RESOURCES[name].get("should_temp", False)
@@ -30,23 +43,19 @@ async def fetch_and_process_resource(name, fetch_fn, RESOURCES, keys, values, de
 
         if result == "Unknown task":
             return {}, {}
-
-    store_key = RESOURCES.get(name, {}).get("store_key")
-    if store_key and store_key in result:
-        del result[store_key]
-
     return result, count
 
 def store_dependencies(resource_name, result, keys, RESOURCES, dependency_data, freed_resources):
-    # Check if current resource is a dependency in any of the freed_resources values
-    is_dependency = any(resource_name in deps for deps in freed_resources.values())
-    
-    if is_dependency:
-        print(f"Storing {resource_name} as dependency data")
-        store_key = RESOURCES.get(resource_name, {}).get("store_key")
-        store_value = result.get(store_key) if store_key else result.get(keys[0], [])
-        dependency_data[resource_name] = store_value
-        print(f"Stored {resource_name} as dependency data for: {dependency_data[resource_name][:3]}")
+    print(f"Storing {resource_name} as dependency data")
+    store_key = RESOURCES.get(resource_name, {}).get("store_key")
+    store_value = result.get(store_key) if store_key else result.get(keys[0], "")
+    dependency_data[resource_name] = store_value
+    # ii = dependency_data[resource_name][:3] if isinstance(dependency_data, list) else dependency_data.keys()
+    print(f"Stored {resource_name} as dependency data for: {dependency_data[resource_name][:3]}")
+    # print(f"Result after storing dependencies: {result.keys() if resource_name == 'Workflows' else None}")
+    result.pop(store_key, None)
+
+    return result
 
 async def schedule_dependents(queue, current_resource, pending_dependencies, completed_resources, RESOURCES):
     to_remove = []
@@ -106,6 +115,7 @@ async def additional_process(resource_name, data, count, dep_data, should_temp, 
         case "Priority Schemes":
             updated_data, updated_count = await process_priority_schemes(JiraFetcher.get_projects_by_priority_scheme, resource_name, data, count)
             return updated_data, updated_count
+        
         # case "Custom Fields":
         #     updated_data, updated_count = await mark_duplicates(resource_name, data, count)
         #     return updated_data, updated_count
@@ -144,8 +154,7 @@ async def fetch_resource(resource_name, fetch_function, values):
             break
     
 
-    # if resource_name == "Issue Security Schemes":
-    #     print(f"length of result is {len(resource)}")
+
 
     start_at = 0
     
@@ -167,13 +176,19 @@ async def worker(queue, results, counts_list, pending_dependencies, completed_re
         if resource_name in pending_dependencies:
             await wait_for_dependencies(resource_name, pending_dependencies, completed_resources)
 
-        print(f"Pending Dependencies: {pending_dependencies}")
-        print(f"\n🚀 Processing: {resource_name}")
+        # print(f"Pending Dependencies: {pending_dependencies}")
+        print(f"\n🚀 Now Processing... {resource_name}")
 
         # 🔗 Check if it depends on another resource
         is_calling_dependent = resource_name in freed_resources
-        dep_string = get_dependency_name(RESOURCES, resource_name)
-        dep_data = dependency_data.get(dep_string, []) if is_calling_dependent else []
+    # Check if current resource is a dependency in any of the freed_resources values
+
+        is_dependency = (resource_name in deps for deps in dependency_data.values())
+
+        # dep_string = get_dependency_name(RESOURCES, resource_name)
+        # dep_data = dependency_data.get(dep_string, []) if is_calling_dependent else []
+        dep_data = get_dependency_data(RESOURCES, resource_name, dependency_data) if is_calling_dependent else []
+        
 
         try:
             result, count = await fetch_and_process_resource(
@@ -181,18 +196,17 @@ async def worker(queue, results, counts_list, pending_dependencies, completed_re
             )
 
             # 📦 Store dependency data if needed
-            store_dependencies(resource_name, result, keys, RESOURCES, dependency_data, freed_resources)
+            result = store_dependencies(resource_name, result, keys, RESOURCES, dependency_data, freed_resources) if is_dependency else None
 
             if is_calling_dependent:
-                print(f"Dependency String: {dep_string}")
-                print(f"Popping {resource_name} from {freed_resources.keys()}")
+                # print(f"Popping {resource_name} from {freed_resources.keys()}")
                 freed_resources.pop(resource_name)
 
             # 📊 Save final results
             if not RESOURCES[resource_name].get("skip_append_flag", False):
                 counts_list.append(count)
                 results.append((resource_name, result))
-                print(f"Stored {resource_name} data")
+                # print(f"Stored {resource_name} data")
 
             completed_resources.add(resource_name)
 

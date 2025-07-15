@@ -7,11 +7,12 @@ RESOURCES = {
     # },
     "Projects": {
         "fetch_function": JiraFetcher.get_projects,
-        "keys": ["id", "name", "insight.lastIssueUpdateTime", "insight.totalIssueCount"],
+        "keys": ["id", "name", "insight.lastIssueUpdateTime", "insight.totalIssueCount", "archived"],
     },
     "Workflows": {
         "fetch_function": JiraFetcher.get_workflows,
         "keys": ["id", "name", "updated", "transitions"],
+        "store_key": "Screen IDs in workflow",
         "dependencies": ["Workflow Schemes"],
         "should_additional_processes" : True,
     },
@@ -30,10 +31,10 @@ RESOURCES = {
     #     "keys": ["id", "name"],
     #     "dependencies": ["Projects"]
     # },
-    # "Issue Statuses": { 
-    #     "fetch_function": JiraFetcher.get_issue_statuses,
-    #     "keys": ["id", "name", "workflowUsages"]
-    # },
+    "Issue Statuses": { 
+        "fetch_function": JiraFetcher.get_issue_statuses,
+        "keys": ["id", "name", "workflowUsages"]
+    },
     # "Issue Priorities": {
     #     "fetch_function": JiraFetcher.get_issue_priorities,
     #     "keys": ["id", "name"]
@@ -80,8 +81,6 @@ RESOURCES = {
     "Issue Type Screen Schemes": {
         "fetch_function": JiraFetcher.get_issue_type_screen_schemes,
         "keys": ["id", "name"],
-        # "should_temp" : True,
-        # "store_key" : "ids_list",
         "dependencies": ["Projects"]
     },
     # "Project Roles": {
